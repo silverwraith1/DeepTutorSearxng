@@ -1,23 +1,27 @@
 name: Build and Publish Docker Image
 
 on:
-  # Manual trigger only - gives full control over when images are published
+  # This allows you to trigger it manually from the Actions tab
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag (e.g., 0.5.2, 0.6.0) - without 'v' prefix"
+        description: "Version tag (e.g., 1.0.0) - without 'v' prefix"
         required: true
         type: string
+        default: "1.0.0"
       push_latest:
         description: "Also update the 'latest' tag?"
         required: true
         type: boolean
         default: true
+  # This triggers the build automatically when you create a GitHub Release
+  release:
+    types: [published]
 
 env:
   REGISTRY: ghcr.io
-  # IMAGE_NAME must be lowercase for Docker
-  IMAGE_NAME: hkuds/deeptutor
+  # Use YOUR repository name instead of the original hkuds name
+  IMAGE_NAME: silverwraith1/deeptutorsearxng
 
 jobs:
   # ============================================
