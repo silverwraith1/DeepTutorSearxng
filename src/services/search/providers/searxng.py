@@ -1,61 +1,89 @@
-import logging
-from typing import Any, Dict, List, Optional
+# -*- coding: utf-8 -*-
+"""
+SearxNG Search Provider
+"""
 
-from pydantic import Field
-from src.services.search.providers.base import BaseSearchProvider
+import logging
+from datetime import datetime
+from typing import Any
+
+from ..base import BaseSearchProvider
+from ..types import Citation, SearchResult, WebSearchResponse
+from . import register_provider
 
 logger = logging.getLogger(__name__)
 
 
+@register_provider("searxng")
 class SearxNGProvider(BaseSearchProvider):
-    """SearxNG search provider with full error handling and configuration."""
+    """SearxNG search provider implementation"""
 
-    name: str = "searxng"
-    host: str = Field(..., description="The SearxNG instance URL")
-    engines: List[str] = Field(default_factory=list)
+    display_name = "SearxNG"
+    description = "Privacy-respecting metasearch engine"
+    supports_answer = False
 
-    def __init__(self, **data: Any):
-        """Initialize the SearxNG wrapper."""
-        super().__init__(**data)
-        # Import moved inside __init__ to prevent ModuleNotFoundError during linting
+    def search(
+        self,
+        query: str,
+        num: int = 10,
+        **kwargs: Any,
+    ) -> WebSearchResponse:
+        """
+        Perform search using SearxNG via LangChain wrapper.
+        """
+        # Lazy import to prevent environment errors during linting
         try:
             from langchain_community.utilities import SearxSearchWrapper
-            self._wrapper = SearxSearchWrapper(
-                searx_host=self.host,
-                engines=self.engines,
-            )
         except ImportError:
-            logger.error("langchain-community not installed. SearxNG will not work.")
-            self._wrapper = None
+            logger.error("langchain-community not installed")
+            raise ImportError("Please install langchain-community to use SearxNG")
 
-    async def search(
-        self, query: str, num_results: int = 5, **kwargs: Any
-    ) -> List[Dict[str, Any]]:
-        """Perform search with error handling and result formatting."""
-        if not self._wrapper:
-            logger.error("SearxNG wrapper not initialized (missing dependencies)")
-            return []
+        # Initialize wrapper using config from self (BaseSearchProvider handles config)
+        # Note: self.api_key or self.config is available depending on base class setup
+        host = kwargs.get("host") or getattr(self, "host", None)
+        
+        wrapper = SearxSearchWrapper(
+            searx_host=host,
+            engines=kwargs.get("engines", []),
+        )
 
-        try:
-            # LangChain wrapper handles the API call
-            raw_results = self._wrapper.results(
-                query,
-                num_results=num_results,
-                **kwargs,
+        raw_results = wrapper.results(query, num_results=num)
+
+        citations: list[Citation] = []
+        search_results: list[SearchResult] = []
+
+        for i, result in enumerate(raw_results, 1):
+            title = result.get("title", "")
+            url_val = result.get("link", "")
+            snippet = result.get("snippet", "")
+
+            sr = SearchResult(
+                title=title,
+                url=url_val,
+                snippet=snippet,
+                source="searxng",
+            )
+            search_results.append(sr)
+
+            citations.append(
+                Citation(
+                    id=i,
+                    reference=f"[{i}]",
+                    url=url_val,
+                    title=title,
+                    snippet=snippet,
+                    source="searxng",
+                )
             )
 
-            formatted_results = []
-            for res in raw_results:
-                formatted_results.append(
-                    {
-                        "title": res.get("title", ""),
-                        "link": res.get("link", ""),
-                        "snippet": res.get("snippet", ""),
-                        "source": self.name,
-                    }
-                )
-            return formatted_results
-
-        except Exception as e:
-            logger.error(f"SearxNG search failed: {str(e)}")
-            return []
+        return WebSearchResponse(
+            query=query,
+            answer="",
+            provider="searxng",
+            timestamp=datetime.now().isoformat(),
+            model="searxng",
+            citations=citations,
+            search_results=search_results,
+            usage={},
+            metadata={},
+        )
