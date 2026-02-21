@@ -1,93 +1,53 @@
-# -*- coding: utf-8 -*-
-"""
-SearXNG Metasearch Provider
-"""
-
-import os
-from datetime import datetime
-from typing import Any, List, Dict
+import logging
+from typing import Any, Dict, List, Optional
 
 from langchain_community.utilities import SearxSearchWrapper
-from ..base import BaseSearchProvider
-from ..types import Citation, SearchResult, WebSearchResponse
-from . import register_provider
+from pydantic import Field
 
-@register_provider("searxng")
+from src.services.search.providers.base import BaseSearchProvider
+
+logger = logging.getLogger(__name__)
+
+
 class SearxNGProvider(BaseSearchProvider):
-    """SearXNG metasearch provider using LangChain wrapper"""
+    """SearxNG search provider with full error handling and configuration."""
 
-    display_name = "SearXNG"
-    description = "Self-hosted metasearch engine"
-    supports_answer = False  # SearXNG returns raw results
+    name: str = "searxng"
+    host: str = Field(..., description="The SearxNG instance URL")
+    engines: List[str] = Field(default_factory=list)
 
-    def __init__(self, **kwargs: Any):
-        super().__init__(**kwargs)
-        # Pulls from your environment variable SEARXNG_URL
-        self.searx_host = os.environ.get("SEARXNG_URL", "http://localhost:8080")
-        self.client = SearxSearchWrapper(searx_host=self.searx_host)
-
-    def search(
-        self,
-        query: str,
-        num_results: int = 10,
-        engines: List[str] = None,
-        categories: List[str] = None,
-        **kwargs: Any,
-    ) -> WebSearchResponse:
-        """
-        Perform search using local SearXNG instance.
-        """
-        self.logger.debug(f"Calling SearXNG at {self.searx_host} for query: {query}")
-        
-        # Get structured results from LangChain
-        raw_results = self.client.results(
-            query, 
-            num_results=num_results, 
-            engines=engines, 
-            categories=categories
+    def __init__(self, **data: Any):
+        """Initialize the SearxNG wrapper."""
+        super().__init__(**data)
+        self._wrapper = SearxSearchWrapper(
+            searx_host=self.host,
+            engines=self.engines,
         )
 
-        citations: List[Citation] = []
-        search_results: List[SearchResult] = []
-
-        for i, result in enumerate(raw_results, 1):
-            title = result.get("title", "No Title")
-            link = result.get("link", "")
-            snippet = result.get("snippet", "")
-            
-            # 1. Create the SearchResult object
-            sr = SearchResult(
-                title=title,
-                url=link,
-                snippet=snippet,
-                source="searxng",
-                date="",  # SearXNG doesn't always provide a specific date string
-                sitelinks=[],
-                attributes={}
+    async def search(
+        self, query: str, num_results: int = 5, **kwargs: Any
+    ) -> List[Dict[str, Any]]:
+        """Perform search with error handling and result formatting."""
+        try:
+            # LangChain wrapper handles the API call
+            raw_results = self._wrapper.results(
+                query,
+                num_results=num_results,
+                **kwargs,
             )
-            search_results.append(sr)
 
-            # 2. Create the Citation object (required for the UI to show [1], [2], etc.)
-            citations.append(
-                Citation(
-                    id=i,
-                    reference=f"[{i}]",
-                    url=link,
-                    title=title,
-                    snippet=snippet,
-                    source="searxng"
+            formatted_results = []
+            for res in raw_results:
+                formatted_results.append(
+                    {
+                        "title": res.get("title", ""),
+                        "link": res.get("link", ""),
+                        "snippet": res.get("snippet", ""),
+                        "source": self.name,
+                    }
                 )
-            )
+            return formatted_results
 
-        # 3. Return the standardized response the ChatAgent expects
-        return WebSearchResponse(
-            query=query,
-            answer="", # SearXNG is a searcher, not a generator
-            provider="searxng",
-            timestamp=datetime.now().isoformat(),
-            model="searxng-local",
-            citations=citations,
-            search_results=search_results,
-            usage={},
-            metadata={"searx_host": self.searx_host}
-        )
+        except Exception as e:
+            logger.error(f"SearxNG search failed: {str(e)}")
+            return []
