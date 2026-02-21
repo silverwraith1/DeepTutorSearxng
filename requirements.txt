@@ -77,3 +77,5 @@ pytest>=7.0.0              # Testing framework
 pre-commit>=3.0.0
 safety<3.0.0               # Pin to stable 2.x version, 3.0.0 is broken
 bandit>=1.8.0
+
+langchain-community
